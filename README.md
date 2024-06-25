@@ -24,10 +24,5 @@
 ## Сборка отчета
 
 ```
-$ pdflatex work.tex
-```
-
-После запроса ввода ввести
-```
-return
+$ latexmk --shell-escape work.tex
 ```
