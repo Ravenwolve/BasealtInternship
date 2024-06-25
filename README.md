@@ -12,10 +12,9 @@
 
 Установка через пакетный менеджер **apt**
 
-1. texlive
-2. texlive-formats-extra
-3. texlive-latex-cyrillic
-4. texlive-fonts-extra
+1. unicode
+2. texlive
+3. texlive-formats-extra
 
 ## Сборка отчета
 
