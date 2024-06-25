@@ -24,5 +24,5 @@
 ## Сборка отчета
 
 ```
-$ latexmk --shell-escape work.tex
+$ latexmk --pdf --shell-escape work.tex
 ```
