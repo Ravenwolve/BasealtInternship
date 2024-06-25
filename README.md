@@ -16,6 +16,11 @@
 2. texlive
 3. texlive-formats-extra
 
+Далее установка через **pip**
+
+1. pygments
+
+
 ## Сборка отчета
 
 ```
