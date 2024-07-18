@@ -420,7 +420,7 @@ API libdbus предоставляет концепцию, называемую 
 В качестве стандарта языка в ходе работы был выбран С++17 из-за его повсеместной поддержки любыми компиляторами.
 
 Qt -- это кроссплатформенный фреймворк, который предоставляет набор инструментов для создания графических интерфейсов пользователя (GUI), работы с сетью, базами данных и другими задачами разработки.
-Он имеет большое сообщество разработчиков и множество готовых компонентов, что упрощает процесс разработки.
+Он имеет большое сообщество разработчиков и множество готовых компонентов, что упрощает процесс разработки\cite{a_qt}.
 
 В качестве инструментария для взаимодействия между компонентами системы используется модуль Qt D-Bus.
 Он позволяет компонентам обмениваться данными и событиями через систему межпроцессного взаимодействия D-Bus.
@@ -490,7 +490,7 @@ copy?: .gear/*.patch
 \end{minted}
 
 В данном случае потребовалось сделать патч из-за ошибки разработчиков в указании флагов для компилятора g++.
-Файл патча выглядит следующим образом:
+Файл патча является текстовым файлом и выглядит он следующим образом:
 
 \begin{minted}{shell}
 Binary files smlnj/.git/index and smlnj-changed/.git/index differ
@@ -541,12 +541,426 @@ diff -ur smlnj/runtime/c-libs/codegen/src/cfg-prim-codegen.cxx smlnj-changed/run
 
 В данной работе было реализовано решение поставленной проблемы с изменением логики построения модели с квадратичных циклов на рекурсивную природу.
 
+Элементарными сущностями в решении являются ComponentCategory и ComponentObject, которые содержат информацию о категории и о компоненте соответственно.
+Обе эти сущности обладают некоторыми общими свойствами, поэтому они являются наследниками абстрактного класса AMCObject.
+
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=10cm]{amcobject.png}
+	\caption{\label{fig:f3}%
+	Иерархия наследников AMCObject}
+\end{figure}
+
+Для начала, чтобы решить поставленную проблему, потребовалось вынести поле m\_category в родительский класс.
+Теперь, когда мы стали полагать, что категория может иметь родительскую категорию, необходимо было изменить процесс построения модели на рекурсивный.
+Как выглядел метод построения модели:
+
+\begin{minted}{cpp}
+void ModelBuilder::build(Model *model)
+{
+    std::vector<std::unique_ptr<ComponentCategory>> categories = buildCategories();
+    std::vector<std::unique_ptr<ComponentObject>> components   = buildObjects();
+
+    for (auto &category : categories)
+    {
+        QString categoryId = category->m_id;
+        auto categoryItem  = std::make_unique<ModelItem>(std::move(category));
+
+        for (int i = 0; i < components.size(); ++i)
+        {
+            if (components[i]->m_category != categoryId)
+            {
+                continue;
+            }
+
+            auto componentItem = std::make_unique<ModelItem>(std::move(components[i]));
+            categoryItem->insertRow(categoryItem->rowCount(), componentItem.release());
+            components.erase(components.begin() + i);
+        }
+
+        // NOTE(cherniginma): don't add empty categories
+        if (categoryItem->rowCount() != 0)
+        {
+            model->insertRow(model->rowCount(), categoryItem.release());
+        }
+    }
+
+    if (components.empty())
+    {
+        return;
+    }
+
+    // NOTE(cherniginma): put the rest of components in default category
+    auto defaultCategory = std::make_unique<ModelItem>(std::move(buildDefaultCategory()));
+    for (auto &component : components)
+    {
+        auto componentItem = std::make_unique<ModelItem>(std::move(component));
+        defaultCategory->insertRow(defaultCategory->rowCount(), componentItem.release());
+    }
+    model->insertRow(model->rowCount(), defaultCategory.release());
+
+    model->correctCheckItemStates();
+}
+
+\end{minted}
+
+В данной реализации сначала строится список категорий и компонентов посредством вызовов методов buildCategories и buildObjects, где инкапсулировано общение с D-Bus.
+Далее в цикле по всем категориям создаётся соответствующая сущность элемента модели (нода дерева) categoryItem, после чего совершается цикл перебора компонентов на поиск тех, которые соответствуют категории на текущей итерации.
+Затем, при нахождении искомых компонентов, на ноду вешаются ноды-потомки componentItem.
+Такие компоненты извлекаются из списка.
+Также в цикле содержится проверка на отсутствие детей у ноды категории, чтобы не добавлять в модель ноды пустых категорий.
+Оставшиеся компоненты, которые не были отнесены ни к одной из категории в списке, заносятся в категорию по умолчанию.
+
+Теперь данный метод выглядит следующим образом.
+
+\begin{minted}{cpp}
+void ModelBuilder::build(Model *model)
+{
+    auto categories = buildCategories();
+    auto components = buildObjects();
+    
+    const QString &WITHOUT_PARENT{};
+
+    for (auto &category : categories[WITHOUT_PARENT])
+    {
+        auto categoryItem = std::make_unique<ModelItem>(std::move(category));
+        buildInner(dynamic_cast<ModelItem *>(categoryItem.get()), categories, components);
+        if (categoryItem->rowCount())
+        {
+            model->insertRow(model->rowCount(), categoryItem.release());
+        }
+    }
+
+    // NOTE(cherniginma): put the rest of components in default category
+    auto defaultCategory = std::make_unique<ModelItem>(std::move(buildDefaultCategory()));
+    for (auto &component : components[WITHOUT_PARENT])
+    {
+        auto componentItem = std::make_unique<ModelItem>(std::move(component));
+        defaultCategory->insertRow(defaultCategory->rowCount(), componentItem.release());
+    }
+
+    // NOTE:(sharovkv) move the components from undefined categories to default category
+    for (auto &[key, vec] : components)
+    {
+        if (categories.find(key) == categories.end())
+        {
+            for (auto &component : vec)
+            {
+                auto componentItem = std::make_unique<ModelItem>(std::move(component));
+                defaultCategory->insertRow(defaultCategory->rowCount(), componentItem.release());
+            }
+        }
+    }
+
+    model->insertRow(model->rowCount(), defaultCategory.release());
+    
+    model->correctCheckItemStates();
+}
+\end{minted}
+
+Теперь категории и объекты строятся изначально в структуру данных вида словаря, где ключом является ID категории, а значением -- список дочерних категорий или список дочерних объектов соответственно.
+В цикле идёт проход по всем категориям, у которых отсутствует родительская категория (ключ -- пустая строка).
+Далее аналогичным образом инициализируется нода категории, после чего происходит заход в метод buildInner по созданной ноде.
+Метод buildInner является рекурсивным, где из принимаемой ноды считывается ID категории для поиска дочерних категорий/объектов по аналогии с циклом в build.
+Выглядит buildInner следующим образом.
+
+\begin{minted}{cpp}
+void ModelBuilder::buildInner(ModelItem *item,
+                              std::unordered_map<QString, std::vector<std::unique_ptr<ComponentCategory>>> &categories,
+                              std::unordered_map<QString, std::vector<std::unique_ptr<ComponentObject>>> &components)
+{
+    const QString& parentId = item->data().value<ComponentCategory *>()->m_id;
+    
+    for (auto &category : categories[parentId])
+    {
+        auto categoryItem = std::make_unique<ModelItem>(std::move(category));
+        buildInner(dynamic_cast<ModelItem *>(categoryItem.get()), categories, components);
+        if (categoryItem->rowCount()) 
+        {
+            item->insertRow(item->rowCount(), categoryItem.release());
+        }
+    }
+    
+    for (auto& component : components[parentId])
+    {
+        auto componentItem = std::make_unique<ModelItem>(std::move(component));
+        item->insertRow(item->rowCount(), componentItem.release());
+    }
+}
+\end{minted}
+
+Условием выхода из рекурсии является пустой список дочерних категорий.
+
+Для того, чтобы с построенной моделью можно было корректно работать, а именно получать её состояние, а также изменять его различными событиями, соответствующие методы также необходимо было переписать.
+
+Компонент принимает одно из трёх состояний:
+
+\begin{itemize}
+    \item Не установлен.
+    \item Частично установлен.
+    \item Установлен.
+\end{itemize}
+
+Метод getCurrentState получения текущего состояния всех компонентов модели выглядел следующим образом:
+
+\begin{minted}{cpp}
+ComponentsState Model::getCurrentState()
+{
+    ComponentsState state{};
+    for (int i = 0; i < rowCount(); i++)
+    {
+        auto categoryItem = dynamic_cast<ModelItem *>(invisibleRootItem()->child(i));
+        for (int j = 0; j < categoryItem->rowCount(); j++)
+        {
+            auto componentItem = dynamic_cast<ModelItem *>(categoryItem->child(j));
+
+            auto component = componentItem->data().value<ComponentObject *>();
+            if (component)
+            {
+                state.insert(component->m_id, component->m_state);
+            }
+        }
+    }
+
+    return state;
+}
+\end{minted}
+
+После переработки он принял следующий вид:
+
+\begin{minted}{cpp}
+ComponentsState Model::getCurrentState()
+{
+    ComponentsState state{};
+    for (size_t i = 0; i < rowCount(); ++i)
+    {
+        auto categoryItem = dynamic_cast<ModelItem *>(invisibleRootItem()->child(i));
+        getCurrentStateInner(categoryItem, state);
+    }
+    
+    return state;
+}
+\end{minted}
+
+Где, по аналогии с buildInner, метод getCurrentStateInner является рекурсивным и ищет искомые компоненты в листьях построенного дерева.
+И выглядит его реализация следующим образом:
+
+\begin{minted}{cpp}
+void Model::getCurrentStateInner(ModelItem *parent, ComponentsState &state)
+{
+    const size_t numberOfChildren = parent->rowCount();
+    for (size_t i = 0; i < numberOfChildren; ++i)
+    {
+        auto childItem = dynamic_cast<ModelItem *>(parent->child(i));
+        if (childItem->itemType == ModelItem::Type::Category)
+        {
+            getCurrentStateInner(childItem, state);
+        }
+        else
+        {
+            auto component = childItem->data().value<ComponentObject *>();
+            if (component)
+            {
+                state.insert(component->m_id, component->m_state);
+            }
+        }
+    }
+}
+\end{minted}
+
+Помимо получения состояния компонентов необходимо так же и изменять их состояние.
+Метод setCurrentState вызывается в случае, когда необходимо сбросить внесённые пользователем изменения для восстановления исходного вида модели.
+
+\begin{minted}{cpp}
+void Model::setCurrentState(ComponentsState state)
+{
+    for (int i = 0; i < rowCount(); i++)
+    {
+        auto categoryItem = dynamic_cast<ModelItem *>(invisibleRootItem()->child(i));
+        for (int j = 0; j < categoryItem->rowCount(); j++)
+        {
+            auto componentItem = dynamic_cast<ModelItem *>(categoryItem->child(j));
+
+            auto component = componentItem->data().value<ComponentObject *>();
+            if (component)
+            {
+                const auto componentState = state[component->m_id];
+                switch (componentState)
+                {
+                case ComponentState::installed:
+                    setData(componentItem->index(), Qt::Checked, Qt::CheckStateRole);
+                    break;
+                case ComponentState::partially_installed:
+                    setData(componentItem->index(), Qt::PartiallyChecked, Qt::CheckStateRole);
+                    break;
+                case ComponentState::not_installed:
+                    setData(componentItem->index(), Qt::Unchecked, Qt::CheckStateRole);
+                    break;
+                }
+            }
+        }
+    }
+}
+\end{minted}
+
+В зависимости от состояния компонента выставляется соответствующее отображение в представлении.
+Рекурсивная реализация данного метода теперь выглядит следующим образом:
+
+\begin{minted}{cpp}
+void Model::resetCurrentState(ComponentsState state)
+{
+    for (size_t i = 0; i < rowCount(); ++i)
+    {
+        auto categoryItem = dynamic_cast<ModelItem *>(invisibleRootItem()->child(i));
+        auto checkStateOfCategory = resetCurrentStateInner(categoryItem, state);
+        categoryItem->setData(checkStateOfCategory, Qt::CheckStateRole);
+    }
+}
+\end{minted}
+
+Где resetCurrentStateInner аналогично является рекурсивным методом.
+
+\begin{minted}{cpp}
+Qt::CheckState Model::resetCurrentStateInner(ModelItem *parent, ComponentsState &state)
+{
+    std::map<Qt::CheckState, int> hasVariant = {{Qt::Unchecked, 0}, {Qt::PartiallyChecked, 0}, {Qt::Checked, 0}};
+    parent->setBackground(QColorConstants::White);
+    const size_t numberOfChildren = parent->rowCount();
+    for (size_t i = 0; i < numberOfChildren; ++i)
+    {
+        auto childItem = dynamic_cast<ModelItem *>(parent->child(i));
+        if (childItem->itemType == ModelItem::Type::Category)
+        {
+            auto checkStateOfCategory = resetCurrentStateInner(childItem, state);
+            childItem->setData(checkStateOfCategory, Qt::CheckStateRole);
+            ++hasVariant[checkStateOfCategory];
+        }
+        else
+        {
+            auto component = childItem->data().value<ComponentObject *>();
+            if (component)
+            {
+                auto checkStateOfComponent = static_cast<Qt::CheckState>(state[component->m_id]); 
+                childItem->setData(checkStateOfComponent, Qt::CheckStateRole);
+                ++hasVariant[checkStateOfComponent];
+            }
+        }
+    }
+
+    if (hasVariant[Qt::Unchecked] == numberOfChildren)
+    {
+        return Qt::Unchecked;
+    }
+    else if (hasVariant[Qt::Checked] == numberOfChildren)
+    {
+        return Qt::Checked;
+    }
+    return Qt::PartiallyChecked;
+}
+\end{minted}
+
+Поскольку resetCurrentState вызывается только при сбросе внесённых изменений, нами было принято решение переименовать его для большего отражения его сути.
+
+Внутри метода resetCurrentStateInner идёт подсчёт количества состояний дочерних нод (unchecked, partially checked и checked), так как представление ноды в модели является сущностью, подобной Check-Box.
+Подсчёт нужен для того, чтобы обозначить состояние текущей ноды.
+Если все дочерние компоненты, в том числе во всех дочерних категориях, установлены, то выставляется состояние checked.
+Если наоборот, ни один дочерний компонент, в том числе во всех дочерних категориях, не установлен, то выставляется состояние unchecked.
+Иначе выставляется состояние partially checked.
+
+И, напоследок, остался метод getComponents получения словаря всех компонентов модели.
+
+\begin{minted}{cpp}
+QMap<QString, ComponentObject> Model::getComponents()
+{
+    QMap<QString, ComponentObject> components;
+    for (int i = 0; i < rowCount(); i++)
+    {
+        auto categoryItem = dynamic_cast<ModelItem *>(invisibleRootItem()->child(i));
+        for (int j = 0; j < categoryItem->rowCount(); j++)
+        {
+            auto componentItem = dynamic_cast<ModelItem *>(categoryItem->child(j));
+            auto component     = componentItem->data().value<ComponentObject *>();
+            if (component)
+            {
+                components.insert(component->m_id, *component);
+            }
+        }
+    }
+
+    return components;
+}
+\end{minted}
+
+Принял этот метод следующий вид:
+
+\begin{minted}{cpp}
+QMap<QString, ComponentObject> Model::getComponents()
+{
+    QMap<QString, ComponentObject> components;
+    for (size_t i = 0; i < rowCount(); ++i)
+    {
+        auto categoryItem = dynamic_cast<ModelItem *>(invisibleRootItem()->child(i));
+        getComponentsInner(categoryItem, components);
+    }
+
+    return components;
+}
+\end{minted}
+
+Где метод getComponentsInner выглядит следующим образом:
+
+\begin{minted}{cpp}
+void Model::getComponentsInner(ModelItem *parent, QMap<QString, ComponentObject> &components)
+{
+    const size_t numberOfChildren = parent->rowCount();
+    for (size_t i = 0; i < numberOfChildren; ++i)
+    {
+        auto childItem = dynamic_cast<ModelItem *>(parent->child(i));
+        if (childItem->itemType == ModelItem::Type::Category)
+        {
+            getComponentsInner(childItem, components);
+        }
+        else
+        {
+            auto component = childItem->data().value<ComponentObject *>();
+            if (component)
+            {
+                components.insert(component->m_id, *component);
+            }
+        }
+    }
+}
+\end{minted}
+
+После внесённых изменений в приложении alterator-application-components стал возможен следующий вид модели, представленный ниже.
+
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=10cm]{ierarchy.png}
+	\caption{\label{fig:f2}%
+	Иерархия компонентов alterator-application-components}
+\end{figure}
+
+Демонстрация изменения состояния модели и её представления.
+
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=10cm]{ierarchy-changed.png}
+	\caption{\label{fig:f2}%
+	Изменение состояния модели}
+\end{figure}
 
 \newpage
 
 % Раздел "Заключение"
 \conclusion
-Заключение.
+
+Подводя итоги, мы ознакомились с разработкой и пакетированием приложений в семействе дистрибутивов ALT Linux.
+
+В ходе работы в проект alterator-application-components была добавлена поддержа вложенных категорий.
+Это должно сделать использование приложения конфигурирования ОС более удобным для пользователей, которыми, в частности, являются системные администраторы.
+
+На текущий момент изменения, проделанные в данной работе, зафиксированы в релизе под номером 0.1.1-alt1 в репозитории Sisyphus.
 
 %Библиографический список, составленный вручную, без использования BibTeX
 %
@@ -563,7 +977,5 @@ diff -ur smlnj/runtime/c-libs/codegen/src/cfg-prim-codegen.cxx smlnj-changed/run
 % Окончание основного документа и начало приложений
 % Каждая последующая секция документа будет являться приложением
 \appendix
-
-\section{Какое-то приложение}
 
 \end{document}
