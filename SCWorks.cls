@@ -30,6 +30,7 @@
 \def\disserformR#1{\gdef\@disserformR{#1}}
 \def\disserformV#1{\gdef\@disserformV{#1}}
 \def\course#1{\gdef\@course{#1}}\course{2}
+\def\scourse#1{\gdef\@scourse{#1}}\scourse{2}
 \def\group#1{\gdef\@group{#1}}\group{211}
 \def\department#1{\gdef\@department{#1}}\department{\cyr\cyrf\cyra\cyrk%
 \cyru\cyrl\cyrsftsn\cyrt\cyre\cyrt\cyra\ \CYRK\CYRN\cyri\CYRI\CYRT}
@@ -59,6 +60,7 @@
 \CYRZ\CYRERY\CYRV}
 
 \def\patitle#1{\gdef\@patitle{#1}}\patitle{\@satitle}
+\def\patitlecompany#1{\gdef\@patitlecompany{#1}}\patitlecompany{\@satitle}
 \def\paname#1{\gdef\@paname{#1}}\paname{\@saname}
 
 \def\napravlenie#1{\gdef\@napravlenie{#1}}\napravlenie{\hbox to 3cm{\hrulefill}}
@@ -618,7 +620,7 @@
 
     \cyrv\cyri\cyrd\ \cyrp\cyrr\cyra\cyrk\cyrt\cyri\cyrk\cyri: \@practtype\\
     \cyrk\cyra\cyrf\cyre\cyrd\cyrr\cyra: \@chair\\
-    \cyrk\cyru\cyrr\cyrs: \@course\\
+    \cyrk\cyru\cyrr\cyrs: \@scourse\\
     \cyrs\cyre\cyrm\cyre\cyrs\cyrt\cyrr: \@term\\
     \cyrp\cyrr\cyro\cyrd\cyro\cyrl\cyrzh\cyri\cyrt\cyre\cyrl\cyrsftsn\cyrn%
     \cyro\cyrs\cyrt\cyrsftsn: \@duration\ \cyrn\cyre\cyrd., \cyrs\ \@practStart\ \cyrg. \cyrp\cyro\ \@practFinish\ \cyrg.
@@ -636,7 +638,9 @@
 \cyrn\cyri\cyrz\cyra\cyrc\cyri\cyri\ (\cyru\cyrch\cyrr\cyre\cyrzh\cyrd%
 \cyre\cyrn\cyri\cyrya, \cyrp\cyrr\cyre\cyrd\cyrp\cyrr\cyri\cyrya\cyrt%
 \cyri\cyrya),\\[12pt]%
-\signature{\@patitle}{\@paname}
+\@patitle
+\newline
+\signature{\@patitlecompany}{\@paname}
 
 \newpage
 \thispagestyle{empty}
